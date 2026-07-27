@@ -4,19 +4,23 @@ import math
 import shutil
 import cv2
 import numpy as np
+import logging
 from PIL import Image
-from manga_ocr import MangaOcr
 import tkinter as tk
-from tkinter import filedialog  
+from tkinter import filedialog 
+from tqdm import tqdm
 
-# ==============================================================================
-# SELECCIÓN DINÁMICA DE CARPETAS
-# ==============================================================================
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+logging.getLogger("transformers").setLevel(logging.ERROR)
+
+
 root = tk.Tk()
 root.withdraw()
 root.attributes('-topmost', True)
 root.lift()
-print("Por favor, selecciona la carpeta del volumen (ej. [豊田 巧] RAIL WARS! 第02巻)...")
+
+print("Por favor, selecciona la carpeta del volumen...")
 ruta_seleccionada = filedialog.askdirectory(title="Selecciona la carpeta del volumen")
 
 if not ruta_seleccionada:
@@ -24,7 +28,6 @@ if not ruta_seleccionada:
 
 ruta_base = os.path.normpath(ruta_seleccionada) + "/"
 
-# Asignar rutas automáticamente
 RUTA_IMAGENES_ORIGEN = ruta_base
 RUTA_SALIDA_TXT = os.path.join(ruta_base, "TXT/")
 RUTA_SALIDA_IMG = os.path.join(ruta_base, "Imagenes/")
@@ -32,15 +35,9 @@ RUTA_SALIDA_IMG = os.path.join(ruta_base, "Imagenes/")
 os.makedirs(RUTA_SALIDA_TXT, exist_ok=True)
 os.makedirs(RUTA_SALIDA_IMG, exist_ok=True)
 
-print(f"[✓] Carpeta origen de imágenes: {RUTA_IMAGENES_ORIGEN}")
-print(f"[✓] Carpeta organizada de imágenes: {RUTA_SALIDA_IMG}")
-print(f"[✓] Carpeta de salida TXT asignada: {RUTA_SALIDA_TXT}")
-
 RUTA_DEBUG = os.path.join(RUTA_IMAGENES_ORIGEN, "debug")
 MODO_DEBUG = False
-ARCHIVO_MAESTRO = os.path.join(RUTA_SALIDA_TXT, "novela_completa.txt")
 
-# Parámetros adaptativos
 ANCHO_MINIMO_COLUMNA_RELATIVO = 0.4
 HUECO_MINIMO_RELATIVO = 0.3          
 ANCHO_FUSION_FURIGANA_RELATIVO = 0.2 
@@ -54,7 +51,6 @@ MAX_CARACTERES_POR_TRAMO = 16
 VENTANA_BUSQUEDA_CORTE = 18    
 PADDING_VERTICAL = 4
 FACTOR_ESCALA_OCR = 2.5
-GENERAR_TXT_MAESTRO = False
 
 if MODO_DEBUG:
     os.makedirs(RUTA_DEBUG, exist_ok=True)
@@ -69,14 +65,6 @@ def leer_imagen_cv(ruta):
     return cv2.imdecode(datos, cv2.IMREAD_COLOR)
 
 
-def guardar_imagen_cv(ruta, imagen):
-    extension = os.path.splitext(ruta)[1]
-    ok, buffer = cv2.imencode(extension, imagen)
-    if ok:
-        buffer.tofile(ruta)
-    return ok
-
-
 def es_imagen_color_o_ilustracion(imagen_cv):
     """
     Analiza la imagen para determinar si es una ilustración a color o en blanco y negro sin texto estructurado.
@@ -85,24 +73,18 @@ def es_imagen_color_o_ilustracion(imagen_cv):
     if imagen_cv is None:
         return False, False
 
-    # 1. Verificación de Color (Diferencia media entre canales BGR)
     b, g, r = cv2.split(imagen_cv)
     diff_rg = cv2.absdiff(r, g)
     diff_rb = cv2.absdiff(r, b)
     diff_gb = cv2.absdiff(g, b)
     desviacion_color = np.mean(diff_rg) + np.mean(diff_rb) + np.mean(diff_gb)
 
-    # Umbral empírico: si supera 12.0, contiene color significativo
     es_color = desviacion_color > 12.0
 
-    # 2. Verificación de Ilustración B/N (Basado en la densidad de zonas oscuras continuas)
     gris = cv2.cvtColor(imagen_cv, cv2.COLOR_BGR2GRAY)
     _, binaria = cv2.threshold(gris, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    # Calcular porcentaje de superficie cubierta por tinta/dibujo
     densidad_tinta = np.sum(binaria > 0) / (imagen_cv.shape[0] * imagen_cv.shape[1])
-
-    # Si es a color o tiene una densidad muy alta típica de dibujos/ilustraciones B/N (> 18%)
     es_ilustracion = es_color or (densidad_tinta > 0.18)
 
     return es_ilustracion, es_color
@@ -271,58 +253,58 @@ def main():
     imagenes.sort(key=orden_natural)
 
     if not imagenes:
-        print(f"No se encontraron imágenes en '{RUTA_IMAGENES_ORIGEN}'")
+        print(f"[!] No se encontraron imágenes en '{RUTA_IMAGENES_ORIGEN}'")
         return
 
-    print(f"Se encontraron {len(imagenes)} páginas para clasificar y procesar.")
+    print(f"\n[✓] {len(imagenes)} imágenes encontradas. Iniciando escaneo...\n")
 
     mocr = None
-    if not MODO_DEBUG:
-        print("Inicializando Manga OCR...")
-        mocr = MangaOcr()
-        print("¡OCR listo!")
+    
+    # Barra de progreso principal con tqdm
+    bar_format = "{l_bar}{bar:30} | {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}"
+    pbar = tqdm(imagenes, desc="Escaneando páginas", bar_format=bar_format)
 
-    textos_paginas = []
-
-    for nombre in imagenes:
+    for nombre in pbar:
         ruta_imagen_orig = os.path.join(RUTA_IMAGENES_ORIGEN, nombre)
         nombre_base, ext = os.path.splitext(nombre)
         
         imagen_cv = leer_imagen_cv(ruta_imagen_orig)
         es_ilustracion, es_color = es_imagen_color_o_ilustracion(imagen_cv)
 
-        # CASO 1: Es una ilustración (Portada, Color o B/N)
+        # CASO 1: Ilustración (A color o B/N)
         if es_ilustracion:
-            # Define el nombre (agrega _COLOR si aplica)
             nuevo_nombre = f"{nombre_base}_COLOR{ext}" if es_color else nombre
             ruta_destino_img = os.path.join(RUTA_SALIDA_IMG, nuevo_nombre)
-
-            # SOLO AQUÍ se copia a la carpeta Imagenes/
             shutil.copy2(ruta_imagen_orig, ruta_destino_img)
+            
+            etiqueta = "Color" if es_color else "Ilustración B/N"
+            pbar.set_postfix_str(f"Guardada {nombre} -> Imagenes/ ({etiqueta})")
+            continue
 
-            tipo_str = "COLOR" if es_color else "ILUSTRACIÓN B/N"
-            print(f"  [+] Ilustración detectada ({tipo_str}) -> Guardada en Imagenes/{nuevo_nombre} (Se omite TXT)")
-            continue  # Pasa a la siguiente página sin hacer OCR ni crear .txt
+        if mocr is None and not MODO_DEBUG:
+            pbar.set_postfix_str("Cargando modelo MangaOCR...")
+            from manga_ocr import MangaOcr
+            mocr = MangaOcr()
 
-        # CASO 2: Es una página de texto regular
-        # (NO se copia a Imagenes/, solo se procesa con OCR para generar el .txt)
-        print(f"Procesando OCR (Página de texto): {nombre}")
+        pbar.set_postfix_str(f"Procesando OCR: {nombre}")
         try:
-            texto = procesar_pagina(mocr, ruta_imagen_orig)
+            texto = procesar_pagina(mocr, ruta_imagen_orig) if not MODO_DEBUG else "TEXTO DEBUG"
         except Exception as e:
-            print(f"  Error procesando OCR en {nombre}: {e}")
+            pbar.set_postfix_str(f"Error en {nombre}: {e}")
             continue
 
         if texto.strip():
             ruta_txt = os.path.join(RUTA_SALIDA_TXT, f"{nombre_base}.txt")
             with open(ruta_txt, "w", encoding="utf-8") as f:
                 f.write(texto)
-            textos_paginas.append(texto)
-            print(f"  [✓] Guardado TXT: {ruta_txt}")
+            pbar.set_postfix_str(f"Guardado TXT: {nombre_base}.txt")
 
-    print(f"\n¡Procesamiento completado!")
+    pbar.close()
+    print("\n" + "="*50)
+    print("¡Procesamiento completado con éxito!")
     print(f"• Ilustraciones organizadas en: {RUTA_SALIDA_IMG}")
-    print(f"• Textos de la novela en: {RUTA_SALIDA_TXT}")
+    print(f"• Textos generados en: {RUTA_SALIDA_TXT}")
+    print("="*50 + "\n")
 
 
 if __name__ == "__main__":

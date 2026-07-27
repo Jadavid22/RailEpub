@@ -4,139 +4,237 @@ from ebooklib import epub
 import tkinter as tk
 from tkinter import filedialog
 
+
 # ==============================================================================
-# 1. CONFIGURACIÓN DINÁMICA DE RUTAS Y DATOS DEL LIBRO
+# 1. SELECCIÓN DE CARPETAS Y CONFIGURACIÓN INICIAL
 # ==============================================================================
 root = tk.Tk()
 root.withdraw()
 root.attributes('-topmost', True)
 root.lift()
 
-print("Por favor, selecciona la carpeta del volumen (ej. [豊田 巧] RAIL WARS! 第02巻)...")
-ruta_seleccionada = filedialog.askdirectory(title="Selecciona la carpeta del volumen")
+print("Por favor, selecciona la carpeta raíz del volumen...")
+ruta_seleccionada = filedialog.askdirectory(title="1. Selecciona la carpeta raíz del volumen")
 
 if not ruta_seleccionada:
-    raise ValueError("No se seleccionó ninguna carpeta. El script ha sido cancelado.")
+    raise ValueError("No se seleccionó la carpeta del volumen. El script ha sido cancelado.")
 
 ruta_volumen = os.path.normpath(ruta_seleccionada)
-
-subcarpetas = [f for f in os.listdir(ruta_volumen) if os.path.isdir(os.path.join(ruta_volumen, f))]
-if os.path.basename(ruta_volumen) in subcarpetas:
-    ruta_volumen = os.path.join(ruta_volumen, os.path.basename(ruta_volumen))
-
 nombre_carpeta = os.path.basename(ruta_volumen)
-match_vol = re.search(r'第(\d+)巻', nombre_carpeta)
-num_vol = match_vol.group(1) if match_vol else "02"
 
-ruta_base_serie = "C:/Users/JUDAPITEC/Documents/David/Halo Novelas/ライトノベル/RAIL WARS! -日本國有鉄道公安隊/"
-dir_dist = os.path.join(ruta_base_serie, "dist")
+titulo_volumen = nombre_carpeta
 
-DIR_TXT = os.path.join(ruta_volumen, "Correccion", "Corregido") + "/"
+match_vol = (
+    re.search(r'第(\d+)巻', nombre_carpeta) or 
+    re.search(r'Vol(?:ume|\.|\_|\s*)?(\d+)', nombre_carpeta, re.IGNORECASE) or 
+    re.search(r'(\d+)', nombre_carpeta)
+)
+
+if match_vol:
+    num_vol = match_vol.group(1).zfill(2)
+else:
+    num_vol = "01"
+
+print(f"[✓] Título detectado: '{titulo_volumen}'")
+print(f"[✓] Número de volumen detectado: Vol. {num_vol}")
+
+print("\n" + "=" * 65)
+print(" CONFIGURACIÓN DEL VOLUMEN")
+print("=" * 65)
+
+entrada_autor = input("-> Ingresa el nombre del autor [presiona Enter para '豊田 巧']: ").strip()
+AUTOR_VOLUMEN = entrada_autor if entrada_autor else "豊田 巧"
+print(f"[✓] Autor configurado: {AUTOR_VOLUMEN}")
+
+print("\n Explicación Desfase: (Número de archivo TXT Cap 1) - (Pág Cap 1 en Indice.txt)")
+print(" Ejemplo: Si el Cap 1 está en '017.txt' y el índice dice 'P.2', el desfase es 15.")
+
+entrada_desfase = input("-> Ingresa el número de desfase [presiona Enter para usar 14]: ").strip()
+
+if entrada_desfase == "":
+    DESFASE_PAGINAS = 14
+else:
+    try:
+        DESFASE_PAGINAS = int(entrada_desfase)
+    except ValueError:
+        print("[!] Entrada no válida. Se usará el desfase por defecto (14).")
+        DESFASE_PAGINAS = 14
+
+print(f"[✓] Desfase configurado en: +{DESFASE_PAGINAS}")
+print("-" * 65 + "\n")
+
+print("Por favor, selecciona la carpeta donde se encuentran los archivos TXT...")
+sugerencia_txt = os.path.join(ruta_volumen, "TXT")
+if not os.path.exists(sugerencia_txt):
+    sugerencia_txt = os.path.join(ruta_volumen, "Correccion", "Corregido")
+if not os.path.exists(sugerencia_txt):
+    sugerencia_txt = ruta_volumen
+
+ruta_txt_sel = filedialog.askdirectory(
+    title="2. Selecciona la carpeta que contiene los archivos TXT",
+    initialdir=sugerencia_txt
+)
+
+if not ruta_txt_sel:
+    raise ValueError("No se seleccionó la carpeta de los archivos TXT. El script ha sido cancelado.")
+
+DIR_TXT = os.path.normpath(ruta_txt_sel) + "/"
+
+print("Por favor, selecciona la carpeta donde deseas guardar el EPUB...")
+dir_dist_sel = filedialog.askdirectory(
+    title="3. Selecciona la carpeta de destino para el EPUB",
+    initialdir=ruta_volumen
+)
+
+if not dir_dist_sel:
+    raise ValueError("No se seleccionó la carpeta de destino del EPUB. El script ha sido cancelado.")
+
 DIR_IMG = os.path.join(ruta_volumen, "Imagenes") + "/"
 
 RUTA_INDICE_TXT = os.path.join(DIR_TXT, "indice.txt")
 if not os.path.exists(RUTA_INDICE_TXT):
     RUTA_INDICE_TXT = os.path.join(DIR_TXT, "Indice.txt")
 
-RUTA_EPUB_SALIDA = os.path.join(dir_dist, f"RAIL_WARS_Vol_{num_vol}.epub")
+# NOMBRE DE ARCHIVO AUTOMATIZADO DE SALIDA
+RUTA_EPUB_SALIDA = os.path.join(dir_dist_sel, f"RAIL_WARS_Vol_{num_vol}.epub")
 
 os.makedirs(DIR_TXT, exist_ok=True)
 os.makedirs(DIR_IMG, exist_ok=True)
-os.makedirs(dir_dist, exist_ok=True)
-
-print(f"\n[✓] Volumen detectado: {nombre_carpeta} (Vol. {num_vol})")
-print(f"    • TXT Corregidos: {DIR_TXT}")
-print(f"    • Imágenes: {DIR_IMG}")
-print(f"    • Archivo índice: {RUTA_INDICE_TXT}")
-print(f"    • EPUB de salida: {RUTA_EPUB_SALIDA}\n")
 
 
 # ==============================================================================
-# 2. FUNCIONES AUXILIARES Y PARSER DE ÍNDICE
+# 2. FUNCIONES AUXILIARES DE PROCESAMIENTO
 # ==============================================================================
+def buscar_archivo_txt(num_pagina, dir_txt):
+    if not os.path.exists(dir_txt):
+        return None
+
+    patron = re.compile(rf'^0*{num_pagina}\.txt$', re.IGNORECASE)
+
+    for fn in os.listdir(dir_txt):
+        if patron.match(fn):
+            return os.path.join(dir_txt, fn)
+    return None
+
+
+def buscar_archivo_imagen(num_pagina, dir_imagenes):
+    if not os.path.exists(dir_imagenes):
+        return None, None
+
+    patron = re.compile(rf'^0*{num_pagina}(?:_.*)?\.(jpg|jpeg|png|webp)$', re.IGNORECASE)
+
+    for fn in os.listdir(dir_imagenes):
+        if patron.match(fn):
+            return os.path.join(dir_imagenes, fn), fn
+    return None, None
+
+
+def analizar_carpeta_imagenes(dir_img):
+    imagenes_encontradas = {}
+    if os.path.exists(dir_img):
+        for fn in os.listdir(dir_img):
+            match = re.match(r'^(\d+)', fn)
+            if match:
+                num = int(match.group(1))
+                if num not in imagenes_encontradas or "_COLOR" in fn.upper():
+                    imagenes_encontradas[num] = fn
+
+    if not imagenes_encontradas:
+        return 5, [11, 12, 13, 14]
+
+    numeros_ordenados = sorted(imagenes_encontradas.keys())
+    
+    num_portada = numeros_ordenados[0]
+    
+    num_color = [
+        n for n, fn in imagenes_encontradas.items() 
+        if n != num_portada and ("COLOR" in fn.upper() or n < 15)
+    ]
+    num_color.sort()
+
+    print(f"[✓] Portada detectada: {imagenes_encontradas[num_portada]} (Pág {num_portada})")
+    print(f"[✓] Ilustraciones a color detectadas: {[imagenes_encontradas[n] for n in num_color]}")
+    return num_portada, num_color
+
+
+NUM_PORTADA, ILUSTRACIONES_COLOR = analizar_carpeta_imagenes(DIR_IMG)
+
+
 def fullwidth_to_int(texto_num):
-    """Convierte números japoneses y letras de ancho completo (incluyendo O como cero) a enteros."""
     full_digits = '０１２３４５６７８９Ｏｏ'
     ascii_digits = '012345678900'
     trans = str.maketrans(full_digits, ascii_digits)
     return int(texto_num.translate(trans))
 
 
-def cargar_portadas_capitulo_desde_txt(ruta_txt, offset_paginas=14):
-    portadas_capitulo = {}
-    if not os.path.exists(ruta_txt):
-        print(f"[!] ADVERTENCIA: No se encontró el índice en: {ruta_txt}")
-        return portadas_capitulo
+def cargar_portadas_capitulo(ruta_indice_txt, offset=12):
+    if not os.path.exists(ruta_indice_txt):
+        print(f"[!] No se encontró el archivo de índice en: {ruta_indice_txt}")
+        return {}
 
-    with open(ruta_txt, "r", encoding="utf-8", errors="ignore") as f:
+    with open(ruta_indice_txt, "r", encoding="utf-8", errors="ignore") as f:
         lineas = f.readlines()
 
-    # Regex universal ultra-flexible: captura cualquier código inicial, título, puntos/espacios y la P (normal o ancha)
     patron = re.compile(r"^\s*([^\s]+[\s ]+.+?)[．\.・\s]+[pPｐＰ]([０-９Ｏｏ\d]+)", re.UNICODE)
+    portadas_capitulo = {}
+    idx_cap = 1
+
+    print(f"\n[✓] PROCESANDO ÍNDICE CON DESFASE (+{offset}):")
 
     for linea in lineas:
-        linea_clean = linea.strip()
-        coincidencia = patron.search(linea_clean)
+        coincidencia = patron.search(linea.strip())
         if coincidencia:
             titulo = coincidencia.group(1).strip()
-            pag_str = coincidencia.group(2)
-            try:
-                pag_indice = fullwidth_to_int(pag_str)
-                pag_real = pag_indice + offset_paginas
-                portadas_capitulo[pag_real] = titulo
-            except Exception as e:
-                print(f"[!] Error procesando página '{pag_str}': {e}")
+            pag_impresa = fullwidth_to_int(coincidencia.group(2))
+            pag_real = pag_impresa + offset
 
-    print(f"\n[✓] CAPÍTULOS DETECTADOS DESDE ÍNDICE ({len(portadas_capitulo)}):")
-    for pag, tit in portadas_capitulo.items():
-        print(f"    • Imagen Portada: {pag:03d} | Texto inicia en: {pag+1:03d}.txt -> {tit}")
-    print("-" * 50)
-    return portadas_capitulo
+            print(f"    • Cap {idx_cap}: '{titulo}' -> Archivo {pag_real:03d} (Pág Impresa: {pag_impresa} + {offset})")
+
+            portadas_capitulo[pag_real] = titulo
+            idx_cap += 1
+
+    print("-" * 60)
+    return dict(sorted(portadas_capitulo.items()))
 
 
-PORTADAS_CAPITULO_AUTO = cargar_portadas_capitulo_desde_txt(RUTA_INDICE_TXT, offset_paginas=14)
+PORTADAS_CAPITULO = cargar_portadas_capitulo(RUTA_INDICE_TXT, offset=DESFASE_PAGINAS)
 
 ESTRUCTURA_VOL = {
-    "titulo": f"RAIL WARS !  {num_vol} 日本國有鉄道公安隊-",
-    "autor": "豊田 巧",
+    "titulo": titulo_volumen,
+    "autor": AUTOR_VOLUMEN,
     "idioma": "ja",
-    "portada": 5,
-    "ilustraciones_color": list(range(11, 15)),
-    "rango_texto": (15, 309),
-    "portadas_capitulo": PORTADAS_CAPITULO_AUTO,
-    "paginas_solo_imagen": [14, 46, 78, 96, 120, 158, 164, 206, 250, 261, 262, 270],
-    "ilustraciones_finales": list(range(295, 305)),
+    "portada": NUM_PORTADA,
+    "ilustraciones_color": ILUSTRACIONES_COLOR,
+    "portadas_capitulo": PORTADAS_CAPITULO,
+    "ilustraciones_finales": [],
 }
 
 
-def buscar_archivo_txt(num_pagina, dir_txt):
-    formatos = [f"{num_pagina:03d}.txt", f"{num_pagina:02d}.txt", f"{num_pagina}.txt"]
-    for fmt in formatos:
-        ruta = os.path.join(dir_txt, fmt)
-        if os.path.exists(ruta):
-            return ruta
-    return None
-
-
-def buscar_archivo_imagen(num_pagina, dir_imagenes):
-    formatos = [f"{num_pagina:03d}", f"{num_pagina:02d}", f"{num_pagina}"]
-    extensiones = [".jpg", ".jpeg", ".png", ".webp"]
-
-    for fmt in formatos:
-        for ext in extensiones:
-            nombre = f"{fmt}{ext}"
-            ruta = os.path.join(dir_imagenes, nombre)
-            if os.path.exists(ruta):
-                return ruta, nombre
-    return None, None
+def obtener_rango_paginas(dir_txt, portadas_capitulo):
+    paginas = set(portadas_capitulo.keys())
+    if os.path.exists(dir_txt):
+        for archivo in os.listdir(dir_txt):
+            match = re.search(r'^(\d+)\.txt$', archivo, re.IGNORECASE)
+            if match:
+                paginas.add(int(match.group(1)))
+    if not paginas:
+        return 1, 350
+    return min(paginas), max(paginas)
 
 
 def crear_css():
     style = """
-    @page { margin: 5px; }
-    body {
+    @page { 
+        margin: 0; 
+    }
+    html, body {
         margin: 0;
-        padding: 10px;
+        padding: 0;
+        height: 100%;
+    }
+
+    body.pagina-texto {
+        padding: 15px 10px;
         font-family: "Hiragino Mincho ProN", "YuMincho", "MS Mincho", serif;
         writing-mode: vertical-rl;
         -webkit-writing-mode: vertical-rl;
@@ -148,27 +246,54 @@ def crear_css():
         margin-bottom: 0;
         text-align: justify;
     }
-    .img-contenedor {
+
+    body.pagina-imagen {
+        margin: 0;
+        padding: 0;
+        writing-mode: horizontal-tb;
+        -webkit-writing-mode: horizontal-tb;
         text-align: center;
+        background-color: #ffffff;
+    }
+
+    .img-contenedor {
+        width: 100%;
+        height: 100vh;
+        margin: 0 auto;
+        padding: 0;
+        display: block;
+        text-align: center;
+        page-break-inside: avoid;
         page-break-before: always;
         page-break-after: always;
-        margin: 0 auto;
-        height: 100vh;
-        writing-mode: horizontal-tb;
     }
+
     .img-contenedor img {
         max-width: 100%;
-        max-height: 98vh;
+        max-height: 95vh;
+        width: auto;
+        height: auto;
+        margin: auto;
+        vertical-align: middle;
         object-fit: contain;
     }
+
     .img-inline {
         text-align: center;
-        margin: 1em 0;
+        margin: 1em auto;
+        page-break-inside: avoid;
+        page-break-before: always;
+        page-break-after: always;
         writing-mode: horizontal-tb;
+        -webkit-writing-mode: horizontal-tb;
     }
+
     .img-inline img {
         max-width: 100%;
+        max-height: 85vh;
+        width: auto;
         height: auto;
+        object-fit: contain;
     }
     """
     return epub.EpubItem(
@@ -180,7 +305,7 @@ def crear_css():
 
 
 # ==============================================================================
-# 3. PROCESAMIENTO Y ARMADO DEL EPUB
+# 3. CONSTRUCCIÓN Y EXPORTACIÓN DEL EPUB
 # ==============================================================================
 def construir_epub():
     print("Iniciando construcción del EPUB...\n")
@@ -188,7 +313,10 @@ def construir_epub():
 
     book.set_title(ESTRUCTURA_VOL["titulo"])
     book.set_language(ESTRUCTURA_VOL["idioma"])
-    book.add_author(ESTRUCTURA_VOL["autor"])
+    
+    # Se agrega el autor únicamente si fue especificado/definido
+    if ESTRUCTURA_VOL["autor"]:
+        book.add_author(ESTRUCTURA_VOL["autor"])
 
     css = crear_css()
     book.add_item(css)
@@ -232,7 +360,7 @@ def construir_epub():
             title="Portada",
             file_name="text/cover.xhtml",
             content=f"""<html><head><link rel="stylesheet" href="../style/style.css" type="text/css"/></head>
-            <body>
+            <body class="pagina-imagen">
                 <div class="img-contenedor">
                     <img src="../images/{nombre_cover}" alt="Portada"/>
                 </div>
@@ -247,7 +375,7 @@ def construir_epub():
         nombre_img = registrar_imagen(paf)
         if nombre_img:
             html_content = f"""<html><head><link rel="stylesheet" href="../style/style.css" type="text/css"/></head>
-            <body>
+            <body class="pagina-imagen">
                 <div class="img-contenedor">
                     <img src="../images/{nombre_img}" alt="Color {paf}"/>
                 </div>
@@ -263,17 +391,20 @@ def construir_epub():
 
     spine.append("nav")
 
-    # --- C. Texto Principal y Portadas de Capítulo ---
     capitulo_actual = None
     contenido_capitulo_html = ""
     num_capitulo = 0
 
-    inicio_txt, fin_txt = ESTRUCTURA_VOL["rango_texto"]
+    min_pag, max_pag = obtener_rango_paginas(DIR_TXT, ESTRUCTURA_VOL["portadas_capitulo"])
+    paginas_omitir = {ESTRUCTURA_VOL["portada"]} | set(ESTRUCTURA_VOL["ilustraciones_color"]) | set(ESTRUCTURA_VOL["ilustraciones_finales"])
 
-    for pag in range(inicio_txt, fin_txt + 1):
+    for pag in range(min_pag, max_pag + 1):
+        if pag in paginas_omitir:
+            continue
+
         if pag in ESTRUCTURA_VOL["portadas_capitulo"]:
-            if capitulo_actual:
-                capitulo_actual.content = f"<html><head><link rel='stylesheet' href='../style/style.css' type='text/css'/></head><body>{contenido_capitulo_html}</body></html>"
+            if capitulo_actual and contenido_capitulo_html.strip():
+                capitulo_actual.content = f"<html><head><link rel='stylesheet' href='../style/style.css' type='text/css'/></head><body class='pagina-texto'>{contenido_capitulo_html}</body></html>"
                 book.add_item(capitulo_actual)
                 spine.append(capitulo_actual)
                 toc.append(capitulo_actual)
@@ -287,62 +418,46 @@ def construir_epub():
             capitulo_actual.add_item(css)
             contenido_capitulo_html = ""
 
-            print(f"[+] Capitulo {num_capitulo}: '{titulo_capitulo_actual}' (Portada en Pág {pag})")
+            print(f"[+] Capitulo {num_capitulo}: '{titulo_capitulo_actual}' -> Archivo TXT {pag:03d}")
 
-            nombre_img_cap = registrar_imagen(pag)
-            if nombre_img_cap:
-                contenido_capitulo_html += f"""
-                <div class="img-contenedor">
-                    <img src="../images/{nombre_img_cap}" alt="{titulo_capitulo_actual}"/>
-                </div>
-                """
+        elif capitulo_actual is None:
+            ruta_txt_check = buscar_archivo_txt(pag, DIR_TXT)
+            if ruta_txt_check:
+                num_capitulo += 1
+                capitulo_actual = epub.EpubHtml(
+                    title="Inicio",
+                    file_name=f"text/capitulo_{num_capitulo:02d}.xhtml",
+                )
+                capitulo_actual.add_item(css)
+                contenido_capitulo_html = ""
 
-        elif pag in ESTRUCTURA_VOL["paginas_solo_imagen"]:
-            nombre_img_int = registrar_imagen(pag)
-            if nombre_img_int:
-                contenido_capitulo_html += f"""
-                <div class="img-inline">
-                    <img src="../images/{nombre_img_int}" alt="Ilustración {pag}"/>
-                </div>
-                """
+        # Si esta página tiene ilustración en la carpeta 'Imagenes', se inserta aquí
+        nombre_img = registrar_imagen(pag)
+        if nombre_img:
+            contenido_capitulo_html += f"""
+            <div class="img-inline">
+                <img src="../images/{nombre_img}" alt="Ilustración {pag}"/>
+            </div>
+            """
 
-        if pag not in ESTRUCTURA_VOL["paginas_solo_imagen"]:
-            ruta_txt = buscar_archivo_txt(pag, DIR_TXT)
-            if ruta_txt:
-                with open(ruta_txt, "r", encoding="utf-8", errors="ignore") as f:
-                    lineas = f.readlines()
+        ruta_txt = buscar_archivo_txt(pag, DIR_TXT)
+        if ruta_txt:
+            with open(ruta_txt, "r", encoding="utf-8", errors="ignore") as f:
+                lineas = f.readlines()
 
-                for linea in lineas:
-                    linea_clean = linea.strip()
-                    if linea_clean:
-                        contenido_capitulo_html += f"<p>{linea_clean}</p>\n"
+            for linea in lineas:
+                linea_clean = linea.strip()
+                if linea_clean:
+                    contenido_capitulo_html += f"<p>{linea_clean}</p>\n"
 
-    if capitulo_actual:
-        capitulo_actual.content = f"<html><head><link rel='stylesheet' href='../style/style.css' type='text/css'/></head><body>{contenido_capitulo_html}</body></html>"
+    # Guardar el último capítulo
+    if capitulo_actual and contenido_capitulo_html.strip():
+        capitulo_actual.content = f"<html><head><link rel='stylesheet' href='../style/style.css' type='text/css'/></head><body class='pagina-texto'>{contenido_capitulo_html}</body></html>"
         book.add_item(capitulo_actual)
         spine.append(capitulo_actual)
         toc.append(capitulo_actual)
 
-    # --- D. Ilustraciones Finales ---
-    for paf in ESTRUCTURA_VOL["ilustraciones_finales"]:
-        nombre_img = registrar_imagen(paf)
-        if nombre_img:
-            html_content = f"""<html><head><link rel="stylesheet" href="../style/style.css" type="text/css"/></head>
-            <body>
-                <div class="img-contenedor">
-                    <img src="../images/{nombre_img}" alt="Final {paf}"/>
-                </div>
-            </body></html>"""
-            item = epub.EpubHtml(
-                title=f"Final {paf}",
-                file_name=f"text/final_{paf:03d}.xhtml",
-                content=html_content,
-            )
-            item.add_item(css)
-            book.add_item(item)
-            spine.append(item)
-
-    # --- E. Exportar ---
+    # --- D. Exportar EPUB ---
     book.toc = tuple(toc)
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
@@ -350,7 +465,7 @@ def construir_epub():
 
     os.makedirs(os.path.dirname(RUTA_EPUB_SALIDA), exist_ok=True)
     epub.write_epub(RUTA_EPUB_SALIDA, book, {})
-    print(f"\n¡EPUB generado con éxito en!: {RUTA_EPUB_SALIDA}")
+    print(f"\n[✓] ¡EPUB generado con éxito!: {RUTA_EPUB_SALIDA}")
 
 
 if __name__ == "__main__":
