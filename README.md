@@ -4,7 +4,7 @@
 
 ---
 
-## ⚙️ Módulos Principales
+## Módulos Principales
 
 ### 1. OCR (Escáner de Texto)
 Es el componente central del procesamiento de imágenes, construido sobre [MangaOCR](https://github.com/kha-white/manga-ocr). 
@@ -42,13 +42,26 @@ Construye el archivo `.epub` final unificando el texto procesado y las imágenes
 </p>
 
 ---
+## Instalación y Uso
 
-## 📁 Arquitectura de Carpetas Requerida
+1. Descarga el archivo `.zip` del proyecto desde GitHub con todos los archivos necesarios y extráelo en tu equipo.
+2. Si no tienes instaladas las librerías necesarias, ejecuta el archivo `.bat` incluido y se instalarán automáticamente.
+3. Luego, ejecuta el archivo **`RailEpub.exe`** y verás el siguiente menú en la terminal:
+
+<p align="center">
+  <img width="674" height="313" alt="Menú Consola RailEpub" src="https://github.com/user-attachments/assets/60758945-3b1b-4403-b3e6-51b7c7cdedfa" />
+</p>
+
+4. Selecciona la opción del menú que necesites según la etapa que vayas a procesar.
+
+> **Nota:** No es necesario utilizar el módulo corrector para hacer el EPUB; siempre que tengas los archivos `.txt` en la carpeta correspondiente, podrás generar el libro sin problemas.
+
+## Arquitectura de Carpetas Requerida
 
 Para que el programa pueda procesar un volumen correctamente, la carpeta raíz debe mantener la siguiente estructura:
 
 ```text
-📁 [Autor] Nombre de la Novela Vol. 01/
+📁 [Autor] Nombre de la Novela Vol. Num/
  ├── 📁 TXT/                        <-- Textos generados por el OCR
  │    └── 📄 Indice.txt             <-- Requerido: Lista de capítulos y páginas
  ├── 📁 Imagenes/                   <-- Ilustraciones y portadas extraídas
@@ -56,4 +69,5 @@ Para que el programa pueda procesar un volumen correctamente, la carpeta raíz d
       ├── 📄 vocabulario_serie.json  <-- Vocabulario base para la novela
       ├── 📄 log_correcciones.txt   <-- Registro de cambios aplicados
       └── 📁 Corregido/             <-- Textos limpios para la generación del EPUB
+      
 
