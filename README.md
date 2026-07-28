@@ -9,7 +9,7 @@
 ### 1. OCR (Escáner de Texto)
 Es el componente central del procesamiento de imágenes, construido sobre [MangaOCR](https://github.com/kha-white/manga-ocr). 
 
-* **Segmentación de imágenes:** Dado que MangaOCR suele presentar fallos al procesar imágenes verticales muy largas, el módulo realiza primero una disección dividiendo la página en secciones de tamaño mediano para maximizar la precisión del reconocimiento.
+* **Segmentación de imágenes:** Dado que MangaOCR suele presentar fallos al procesar imágenes verticales muy largas, el módulo realiza primero una segmentación dividiendo la página en secciones de tamaño mediano para maximizar la precisión del reconocimiento.
 * **Filtrado automático:** Identifica páginas con ilustraciones (a color o blanco y negro) y las mueve a una carpeta dedicada de imágenes (`Imagenes/`), omitiendo la creación de archivos de texto vacíos para ellas.
 
 <p center="align">
@@ -33,8 +33,29 @@ Encargado de solucionar las confusiones comunes de kanjis similares producidas p
 ### 3. EPUB (Generador de Libro)
 Construye el archivo `.epub` final unificando el texto procesado y las imágenes extraídas.
 
-* **Estructura por capítulos:** Requiere que exista un archivo `Indice.txt` en la carpeta `TXT/`. Este archivo es crucial ya que define la división de capítulos de la novela (debido a que el OCR suele fallar en el índice, se debe verificar y corregir manualmente antes de empaquetar).
+* **Estructura por capítulos:** Requiere que exista un archivo `Indice.txt` en la carpeta `TXT/`. Este archivo es crucial ya que define la división de capítulos de la novela (debido a que el OCR suele fallar en el índice, se debe verificar y corregir manualmente antes de empaquetar), un ejemplo es el siguiente:
+  
+ <img width="780" height="1200" alt="017" src="https://github.com/user-attachments/assets/259a0f30-a074-4ab1-bd37-b65f9705a009" />
+
+  ```text
+  目 次
+  
+  ＲＯＯＯ１ 国鉄リニア 出発進行 ............................................P005
+  
+  ＲＯＯＯ２ 一人だけの戦い 場内警戒 ........................................P089
+  
+  ＲＯＯＯ３ 迫る東京駅 非常警戒 ............................................P159
+  
+  ＲＯＯＯ４ 事件が終わり...... 停止位置よし！................................P279
+  
+  ```
+
 * **Nombres y Metadatos:** Detecta automáticamente el nombre de la novela y el volumen desde el directorio raíz. Durante la ejecución, el programa solicitará el nombre del autor y el **desfase** (la diferencia numérica entre la página indicada en el índice y la numeración real del archivo `.txt`).
+```text
+Página del índice: 005
+Archivo OCR:      009.txt
+Desfase:          +4
+```
 * Al finalizar el proceso, exporta el libro listo para leer en la ubicación indicada.
 
 <p center="align">
@@ -44,7 +65,7 @@ Construye el archivo `.epub` final unificando el texto procesado y las imágenes
 ---
 ## Instalación y Uso
 
-1. Descarga el archivo `.zip` del proyecto desde GitHub con todos los archivos necesarios y extráelo en tu equipo.
+1. Descarga el archivo `.zip`  del repositorio: [GitHub - Jadavid22/RailEpub] con todos los archivos necesarios y extráelo en tu equipo.
 2. Si no tienes instaladas las librerías necesarias, ejecuta el archivo `.bat` incluido y se instalarán automáticamente.
 3. Luego, ejecuta el archivo **`RailEpub.exe`** y verás el siguiente menú en la terminal:
 
@@ -69,5 +90,34 @@ Para que el programa pueda procesar un volumen correctamente, la carpeta raíz d
       ├── 📄 vocabulario_serie.json  <-- Vocabulario base para la novela
       ├── 📄 log_correcciones.txt   <-- Registro de cambios aplicados
       └── 📁 Corregido/             <-- Textos limpios para la generación del EPUB
-      
+```
+## Limitaciones
 
+RailEpub está orientado principalmente a novelas ligeras japonesas
+con texto vertical.
+
+El OCR puede presentar errores en:
+
+- caracteres kanji visualmente similares;
+- nombres propios poco frecuentes;
+- texto extremadamente pequeño;
+- páginas con diseños poco convencionales.
+
+El módulo Cleaner reduce muchos de estos errores mediante un vocabulario específico de la obra y comparación aproximada de términos, además de reglas para evitar correcciones incorrectas.
+
+## Resultado
+
+El resultado final será un archivo EPUB que contiene:
+
+- portada;
+- capítulos organizados;
+- texto OCR corregido;
+- ilustraciones;
+- metadatos del volumen;
+- índice de navegación.
+
+## Licencia
+MIT License
+
+## Autor
+Jadavid22
