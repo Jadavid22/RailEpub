@@ -167,6 +167,34 @@ def fullwidth_to_int(texto_num):
     return int(texto_num.translate(trans))
 
 
+def unir_lineas_parrafo(lineas):
+    SIGNOS_CIERRE = set('。！？…」）』】〉》"\'')
+    parrafos = []
+    actual = ""
+
+    for linea in lineas:
+        linea_clean = linea.strip()
+        if not linea_clean:
+            if actual:
+                parrafos.append(actual)
+                actual = ""
+            continue
+
+        if actual:
+            actual += linea_clean
+        else:
+            actual = linea_clean
+
+        if linea_clean and linea_clean[-1] in SIGNOS_CIERRE:
+            parrafos.append(actual)
+            actual = ""
+
+    if actual:
+        parrafos.append(actual)
+
+    return parrafos
+
+
 def cargar_portadas_capitulo(ruta_indice_txt, offset=12):
     if not os.path.exists(ruta_indice_txt):
         print(f"[!] No se encontró el archivo de índice en: {ruta_indice_txt}")
@@ -445,10 +473,9 @@ def construir_epub():
             with open(ruta_txt, "r", encoding="utf-8", errors="ignore") as f:
                 lineas = f.readlines()
 
-            for linea in lineas:
-                linea_clean = linea.strip()
-                if linea_clean:
-                    contenido_capitulo_html += f"<p>{linea_clean}</p>\n"
+            parrafos = unir_lineas_parrafo(lineas)
+            for parrafo in parrafos:
+                contenido_capitulo_html += f"<p>{parrafo}</p>\n"
 
     # Guardar el último capítulo
     if capitulo_actual and contenido_capitulo_html.strip():
